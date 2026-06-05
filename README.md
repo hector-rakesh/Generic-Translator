@@ -142,9 +142,7 @@ HF_API_TOKEN=hf_xxxxxxxxxxxxxxxxxxxx
 HF_MODEL_ID=mistralai/Mistral-7B-Instruct-v0.3
 ```
 
-Any HuggingFace model that supports the **text-generation** task works.
-Recommended instruction-following models:
-
+Instructions model considered:
 - `mistralai/Mistral-7B-Instruct-v0.3` (default)
 - `HuggingFaceH4/zephyr-7b-beta`
 - `microsoft/Phi-3-mini-4k-instruct`
@@ -157,9 +155,6 @@ LLM_PROVIDER=llama_local
 LLAMA_BASE_URL=http://localhost:11434/v1
 LLAMA_MODEL_ID=llama3
 ```
-
-No code changes needed — just update `.env`.
-
 ---
 
 ## Running tests
