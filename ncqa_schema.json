@@ -1,0 +1,522 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "NCQA_HPA_CredentialingAndRecredentialing",
+    "description": "Schema for extracting structured data from NCQA HPA Standards: Credentialing and Recredentialing (CR) document. Effective for surveys on or after July 1, 2026.",
+    "type": "object",
+    "x-strict": true,
+  
+    "properties": {
+  
+      "document_metadata": {
+        "type": "object",
+        "description": "Top-level metadata about the standards document itself.",
+        "x-strict": true,
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "Full title of the standards document.",
+            "x-strict": true
+          },
+          "effective_date": {
+            "type": "string",
+            "format": "date",
+            "description": "Date from which these standards are effective (YYYY-MM-DD).",
+            "x-strict": true
+          },
+          "standard_set": {
+            "type": "string",
+            "description": "Name of the standard set, e.g. '2026 HPA Standards and Guidelines'.",
+            "x-strict": true
+          }
+        },
+        "required": ["title", "effective_date", "standard_set"],
+        "additionalProperties": false
+      },
+  
+      "credentialing_standards": {
+        "type": "array",
+        "description": "List of all CR standards (CR 1 through CR 9) extracted from the document.",
+        "x-strict": true,
+        "minItems": 1,
+        "items": {
+          "type": "object",
+          "description": "A single top-level CR standard (e.g. CR 1: Credentialing Policies).",
+          "properties": {
+  
+            "standard_id": {
+              "type": "string",
+              "description": "Identifier for the standard, e.g. 'CR 1', 'CR 2'.",
+              "pattern": "^CR \\d+$",
+              "x-strict": true
+            },
+            "standard_title": {
+              "type": "string",
+              "description": "Full title of the standard, e.g. 'Credentialing Policies'.",
+              "x-strict": true
+            },
+            "intent": {
+              "type": "string",
+              "description": "The stated intent or purpose of this standard.",
+              "x-strict": false
+            },
+            "elements": {
+              "type": "array",
+              "description": "List of elements (sub-sections) within this standard (e.g. Element A, Element B).",
+              "x-strict": true,
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "description": "A single element within a CR standard.",
+                "properties": {
+  
+                  "element_id": {
+                    "type": "string",
+                    "description": "Element identifier letter, e.g. 'A', 'B', 'C'.",
+                    "x-strict": true
+                  },
+                  "element_title": {
+                    "type": "string",
+                    "description": "Full title of the element, e.g. 'Practitioner Credentialing Guidelines'.",
+                    "x-strict": true
+                  },
+                  "is_must_pass": {
+                    "type": "boolean",
+                    "description": "Whether this element is designated as a MUST-PASS element.",
+                    "x-strict": true
+                  },
+  
+                  "scoring": {
+                    "type": "object",
+                    "description": "Scoring thresholds for Met, Partially Met, Not Met.",
+                    "x-strict": false,
+                    "properties": {
+                      "met": {
+                        "type": "string",
+                        "description": "Criteria to score Met, e.g. 'The organization meets 11-13 factors'."
+                      },
+                      "partially_met": {
+                        "type": "string",
+                        "description": "Criteria to score Partially Met."
+                      },
+                      "not_met": {
+                        "type": "string",
+                        "description": "Criteria to score Not Met."
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+  
+                  "data_source": {
+                    "type": "string",
+                    "description": "The type of evidence NCQA reviews, e.g. 'Documented process', 'Records or files'.",
+                    "x-strict": false
+                  },
+  
+                  "scope_of_review": {
+                    "type": "object",
+                    "description": "Which product lines and survey types this element applies to.",
+                    "x-strict": false,
+                    "properties": {
+                      "interim_surveys": {
+                        "type": ["string", "null"],
+                        "description": "Applicability for Interim Surveys."
+                      },
+                      "first_surveys": {
+                        "type": ["string", "null"],
+                        "description": "Applicability for First Surveys."
+                      },
+                      "renewal_surveys": {
+                        "type": ["string", "null"],
+                        "description": "Applicability for Renewal Surveys."
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+  
+                  "look_back_periods": {
+                    "type": "array",
+                    "description": "Look-back period rules for different survey types.",
+                    "x-strict": false,
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "survey_type": {
+                          "type": "string",
+                          "description": "Survey type, e.g. 'Interim Surveys', 'First Surveys', 'Renewal Surveys', 'All Surveys'."
+                        },
+                        "period": {
+                          "type": "string",
+                          "description": "Look-back period description, e.g. '24 months', '6 months', 'Prior to the survey date'."
+                        },
+                        "exceptions": {
+                          "type": ["string", "null"],
+                          "description": "Any factor-level exceptions to the standard look-back period, e.g. '12 months for factors 6, 9, 13'."
+                        }
+                      },
+                      "required": ["survey_type", "period"],
+                      "additionalProperties": false
+                    }
+                  },
+  
+                  "exceptions": {
+                    "type": ["string", "null"],
+                    "description": "Any stated exceptions or NA conditions for this element.",
+                    "x-strict": false
+                  },
+  
+                  "factors": {
+                    "type": "array",
+                    "description": "Individual factors (numbered requirements) within this element.",
+                    "x-strict": true,
+                    "items": {
+                      "type": "object",
+                      "description": "A single factor within an element.",
+                      "properties": {
+  
+                        "factor_number": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "description": "The numeric identifier of this factor (e.g. 1, 2, 3).",
+                          "x-strict": true
+                        },
+                        "factor_title": {
+                          "type": "string",
+                          "description": "Short descriptive title of the factor, e.g. 'Types of practitioners'.",
+                          "x-strict": true
+                        },
+                        "description": {
+                          "type": "string",
+                          "description": "Full explanation of what the factor requires.",
+                          "x-strict": false
+                        },
+                        "is_critical_factor": {
+                          "type": "boolean",
+                          "description": "Whether this is a critical factor (scoring cannot exceed Partially Met if scored No).",
+                          "x-strict": false
+                        },
+                        "verification_time_limit_days": {
+                          "type": ["integer", "null"],
+                          "minimum": 0,
+                          "description": "Verification time limit in calendar days, if applicable (e.g. 120 for 120-day limit). Null if not applicable.",
+                          "x-strict": false
+                        },
+                        "verification_time_limit_note": {
+                          "type": ["string", "null"],
+                          "description": "Any transitional note about when the time limit applies, e.g. files processed on or after July 1, 2025.",
+                          "x-strict": false
+                        },
+                        "acceptable_sources": {
+                          "type": "array",
+                          "description": "Acceptable verification or data sources listed for this factor.",
+                          "x-strict": false,
+                          "items": {
+                            "type": "string"
+                          },
+                          "uniqueItems": true
+                        },
+                        "practitioner_types_in_scope": {
+                          "type": "array",
+                          "description": "Practitioner types explicitly listed as being in scope for this factor (if applicable).",
+                          "x-strict": false,
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "is_na_for_recredentialing": {
+                          "type": "boolean",
+                          "description": "Whether this factor is explicitly NA for recredentialing files.",
+                          "x-strict": false
+                        },
+                        "examples": {
+                          "type": ["string", "null"],
+                          "description": "Any examples provided for this factor.",
+                          "x-strict": false
+                        }
+                      },
+                      "required": ["factor_number", "factor_title"],
+                      "additionalProperties": false
+                    }
+                  },
+  
+                  "summary_of_changes": {
+                    "type": "array",
+                    "description": "List of changes noted in the 'Summary of Changes' section for this element.",
+                    "x-strict": false,
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "change_type": {
+                          "type": "string",
+                          "enum": ["Clarification", "Policy Change", "No Change"],
+                          "description": "Category of the change."
+                        },
+                        "description": {
+                          "type": "string",
+                          "description": "Description of the specific change made."
+                        }
+                      },
+                      "required": ["change_type", "description"],
+                      "additionalProperties": false
+                    }
+                  },
+  
+                  "related_information": {
+                    "type": ["string", "null"],
+                    "description": "Any 'Related information' notes provided for this element.",
+                    "x-strict": false
+                  }
+  
+                },
+                "required": ["element_id", "element_title", "is_must_pass", "factors"],
+                "additionalProperties": false
+              }
+            }
+  
+          },
+          "required": ["standard_id", "standard_title", "elements"],
+          "additionalProperties": false
+        }
+      },
+  
+      "practitioner_scope": {
+        "type": "object",
+        "description": "Global rules defining which practitioners are within the scope of credentialing, as defined in CR 1, Element A.",
+        "x-strict": false,
+        "properties": {
+          "inclusion_criteria": {
+            "type": "array",
+            "description": "Criteria that must all be met for a practitioner to be in scope.",
+            "items": { "type": "string" }
+          },
+          "applicable_settings": {
+            "type": "array",
+            "description": "Practice settings where the scope criteria apply (e.g. individual practice, telemedicine, locum tenens).",
+            "items": { "type": "string" }
+          },
+          "excluded_practitioners": {
+            "type": "array",
+            "description": "Practitioner categories explicitly excluded from credentialing scope.",
+            "items": { "type": "string" }
+          },
+          "provisional_credentialing_rules": {
+            "type": "object",
+            "description": "Rules specific to provisional credentialing.",
+            "properties": {
+              "max_provisional_days": {
+                "type": "integer",
+                "description": "Maximum number of calendar days a practitioner may be held in provisional status.",
+                "x-strict": false
+              },
+              "required_verifications": {
+                "type": "array",
+                "description": "Items that must be verified within time limits for provisional credentialing.",
+                "items": { "type": "string" }
+              },
+              "restrictions": {
+                "type": "array",
+                "description": "Restrictions that apply to provisionally credentialed practitioners.",
+                "items": { "type": "string" }
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+  
+      "recredentialing_cycle": {
+        "type": "object",
+        "description": "Global recredentialing cycle rules extracted from CR 4.",
+        "x-strict": false,
+        "properties": {
+          "max_cycle_months": {
+            "type": "integer",
+            "description": "Maximum recredentialing cycle length in months (e.g. 36).",
+            "x-strict": false
+          },
+          "cycle_extension_conditions": {
+            "type": "array",
+            "description": "Conditions under which the recredentialing cycle may be extended beyond the maximum.",
+            "items": { "type": "string" }
+          },
+          "post_extension_deadline_days": {
+            "type": "integer",
+            "description": "Number of calendar days within which the practitioner must be recredentialed after returning from an extension condition.",
+            "x-strict": false
+          },
+          "termination_and_reinstatement_rules": {
+            "type": "object",
+            "description": "Rules for termination and reinstatement affecting credentialing cycle.",
+            "properties": {
+              "reinstatement_without_initial_credentialing_days": {
+                "type": "integer",
+                "description": "Maximum days after termination within which reinstatement does not require full initial credentialing."
+              },
+              "failure_to_recredential_grace_period_days": {
+                "type": "integer",
+                "description": "Calendar days after missing the 36-month deadline within which recredentialing may still be completed before initial credentialing is required."
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+  
+      "ongoing_monitoring": {
+        "type": "object",
+        "description": "Global ongoing monitoring rules extracted from CR 5.",
+        "x-strict": false,
+        "properties": {
+          "review_frequency_days": {
+            "type": "integer",
+            "description": "Frequency in calendar days for reviewing sanction/exclusion/licensure information (e.g. 30).",
+            "x-strict": false
+          },
+          "monitoring_service_alert_window_days": {
+            "type": "integer",
+            "description": "Days within which a new alert from a monitoring service subscription must be reviewed (e.g. 30).",
+            "x-strict": false
+          },
+          "adverse_event_monitoring_rules": {
+            "type": "array",
+            "description": "Time-based rules for adverse event monitoring frequency, including effective dates.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "effective_from": {
+                  "type": ["string", "null"],
+                  "format": "date",
+                  "description": "Date from which this rule applies (YYYY-MM-DD). Null if no start bound."
+                },
+                "frequency": {
+                  "type": "string",
+                  "description": "Required monitoring frequency, e.g. 'At least monthly', 'At least every 6 months'."
+                }
+              },
+              "required": ["frequency"],
+              "additionalProperties": false
+            }
+          },
+          "complaint_review_rules": {
+            "type": "object",
+            "description": "Rules for collecting and reviewing member complaints.",
+            "properties": {
+              "individual_complaint_action": {
+                "type": "string",
+                "description": "Required action upon receipt of a practitioner-specific complaint."
+              },
+              "aggregate_review_frequency_months": {
+                "type": "integer",
+                "description": "Frequency in months for evaluating the full history of complaints for all practitioners (e.g. 6)."
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+  
+      "delegation_rules": {
+        "type": "object",
+        "description": "Global delegation rules extracted from CR 9.",
+        "x-strict": false,
+        "properties": {
+          "agreement_required_factors": {
+            "type": "array",
+            "description": "List of items that a written delegation agreement must address.",
+            "items": { "type": "string" }
+          },
+          "predelegation_evaluation_window_months": {
+            "type": "integer",
+            "description": "Number of months before delegation implementation within which predelegation evaluation must occur (e.g. 12).",
+            "x-strict": false
+          },
+          "annual_file_audit_methods": {
+            "type": "array",
+            "description": "Acceptable methodologies for the annual delegate credentialing file audit.",
+            "items": { "type": "string" }
+          },
+          "effectiveness_audit_window": {
+            "type": "object",
+            "description": "Time window after annual audit within which the corrective-action effectiveness audit must occur.",
+            "properties": {
+              "min_months_after_annual_audit": {
+                "type": "integer",
+                "description": "Minimum months after annual audit (e.g. 3)."
+              },
+              "max_months_after_annual_audit": {
+                "type": "integer",
+                "description": "Maximum months after annual audit (e.g. 6)."
+              }
+            },
+            "additionalProperties": false
+          },
+          "automatic_credit_conditions": {
+            "type": "array",
+            "description": "Conditions under which automatic credit is available for delegation elements.",
+            "items": { "type": "string" }
+          }
+        },
+        "additionalProperties": false
+      },
+  
+      "information_integrity_rules": {
+        "type": "object",
+        "description": "Global credentialing information integrity rules extracted from CR 8.",
+        "x-strict": false,
+        "properties": {
+          "inappropriate_documentation_types": {
+            "type": "array",
+            "description": "Explicitly prohibited documentation and update actions.",
+            "items": { "type": "string" }
+          },
+          "audit_sample_methodology": {
+            "type": "object",
+            "description": "Rules for determining the annual audit sample size.",
+            "properties": {
+              "percentage": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 100,
+                "description": "Percentage of eligible files to audit (e.g. 5 for 5%)."
+              },
+              "max_files": {
+                "type": "integer",
+                "description": "Maximum number of files to audit, whichever is less than the percentage calculation (e.g. 50)."
+              },
+              "min_initial_credentialing_files": {
+                "type": "integer",
+                "description": "Minimum number of initial credentialing files in the sample (e.g. 10)."
+              },
+              "min_recredentialing_files": {
+                "type": "integer",
+                "description": "Minimum number of recredentialing files in the sample (e.g. 10)."
+              }
+            },
+            "additionalProperties": false
+          },
+          "annual_training_required_topics": {
+            "type": "array",
+            "description": "Topics on which credentialing staff must be trained annually.",
+            "items": { "type": "string" }
+          },
+          "ncqa_reportable_threshold_percentage": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100,
+            "description": "Threshold percentage of noncompliant files that triggers a mandatory self-report to NCQA (e.g. 5 for 5%).",
+            "x-strict": false
+          }
+        },
+        "additionalProperties": false
+      }
+  
+    },
+  
+    "required": [
+      "document_metadata",
+      "credentialing_standards"
+    ],
+    "additionalProperties": false
+  }

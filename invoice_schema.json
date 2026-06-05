@@ -1,0 +1,81 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Invoice",
+  "description": "Schema for extracting invoice data from documents.",
+  "type": "object",
+  "required": ["invoice_number", "total_amount"],
+  "properties": {
+    "invoice_number": {
+      "type": "string",
+      "description": "Unique invoice identifier, e.g. INV-2024-001",
+      "x-strict": true
+    },
+    "invoice_date": {
+      "type": "string",
+      "format": "date",
+      "description": "Date the invoice was issued (YYYY-MM-DD)",
+      "x-strict": true
+    },
+    "vendor_name": {
+      "type": "string",
+      "description": "Name of the company or individual issuing the invoice",
+      "x-strict": true
+    },
+    "vendor_email": {
+      "type": ["string", "null"],
+      "format": "email",
+      "description": "Vendor contact email (optional)",
+      "x-strict": false
+    },
+    "client_name": {
+      "type": "string",
+      "description": "Name of the client / bill-to party",
+      "x-strict": true
+    },
+    "line_items": {
+      "type": "array",
+      "description": "List of individual line items on the invoice",
+      "x-strict": false,
+      "items": {
+        "type": "object",
+        "properties": {
+          "description": { "type": "string" },
+          "quantity":    { "type": "number" },
+          "unit_price":  { "type": "number" },
+          "total":       { "type": "number" }
+        }
+      }
+    },
+    "subtotal": {
+      "type": ["number", "null"],
+      "description": "Pre-tax total",
+      "x-strict": false
+    },
+    "tax_amount": {
+      "type": ["number", "null"],
+      "description": "Tax charged",
+      "x-strict": false
+    },
+    "total_amount": {
+      "type": "number",
+      "description": "Final total amount due",
+      "x-strict": true
+    },
+    "currency": {
+      "type": "string",
+      "enum": ["USD", "EUR", "GBP", "INR", "AUD"],
+      "description": "Currency code",
+      "x-strict": false
+    },
+    "payment_terms": {
+      "type": ["string", "null"],
+      "description": "Payment terms, e.g. 'Net 30'",
+      "x-strict": false
+    },
+    "notes": {
+      "type": ["string", "null"],
+      "description": "Any additional notes on the invoice",
+      "x-strict": false
+    }
+  }
+}
