@@ -20,6 +20,7 @@ from typing import Any
 import requests
 from tenacity import retry, stop_after_attempt, wait_exponential
 from huggingface_hub import InferenceClient
+from groq import Groq, APIConnectionError, AuthenticationError, APIError
 
 from core.config import get_settings
 
@@ -75,6 +76,49 @@ class BaseLLMClient(ABC):
         """Send *prompt* and return the raw text response."""
 
 
+# ── Groq backend ────────────────────────────────────────────────────────
+
+class GroqClient(BaseLLMClient):
+    """
+    Calls the Groq Inference API.
+    """
+
+    def __init__(self):
+        if not settings.GROQ_API_KEY:
+            raise RuntimeError(
+                "GROQ_API_KEY is not set. "
+                "Get one at https://console.groq.com and add it to your .env file."
+            )
+        self.model_id = settings.groq_model_id
+        self.client = Groq(api_key=settings.GROQ_API_KEY)
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+    )
+    def complete(self, prompt: str) -> str:
+        try:
+            completion = self.client.chat.completions.create(
+                model=self.model_id,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.1,       # near-deterministic for extraction
+                max_tokens=2048,
+            )
+        except APIConnectionError as exc:
+            raise RuntimeError(
+                "Network error contacting Groq API. "
+                "Check your internet connectivity."
+            ) from exc
+        except AuthenticationError as exc:
+            raise RuntimeError(
+                "Invalid GROQ_API_KEY. Verify it at https://console.groq.com."
+            ) from exc
+        except APIError as exc:
+            raise RuntimeError(f"Groq API error: {exc}") from exc
+
+        return completion.choices[0].message.content.strip()
+
+
 # ── HuggingFace backend ────────────────────────────────────────────────────────
 
 class HuggingFaceClient(BaseLLMClient):
@@ -86,14 +130,15 @@ class HuggingFaceClient(BaseLLMClient):
     BASE_URL = "https://api-inference.huggingface.co/models"
 
     def __init__(self):
-        if not settings.hf_api_token:
+        if not settings.HF_API_TOKEN:
             raise RuntimeError(
                 "HF_API_TOKEN is not set. "
                 "Add it to your .env file or environment variables."
             )
         self.model_id = settings.hf_model_id
-        self.headers = {"Authorization": f"Bearer {settings.hf_api_token}"}
-        self.client = InferenceClient(token=settings.hf_api_token)
+        # self.headers = {"Authorization": f"Bearer {settings.HF_API_TOKEN}"}
+        print("Using HuggingFace token:", settings.HF_API_TOKEN)
+        self.client = InferenceClient(token=settings.HF_API_TOKEN)
 
     @retry(
         stop=stop_after_attempt(3),
@@ -129,30 +174,31 @@ class HuggingFaceClient(BaseLLMClient):
 
         # Using HuggingFace API Client
         #------------------------------------------
-        completion = self.client.chat.completions.create(
-            model=self.model_id,
-            messages=[
-               {"role": "user", "content": prompt}
-            ],
-        )
+        try:
+            completion = self.client.chat.completions.create(
+                model=self.model_id,
+                messages=[{"role": "user", "content": prompt}],
+            )
+        except Exception as exc:
+            print("ERROR::: Error at chat completion create function.....")
+            print(exc)
+            raise RuntimeError(
+                "Network error contacting HuggingFace Inference API. "
+                "Check internet/DNS connectivity, your network/proxy settings, "
+                "or switch to a local provider with LLM_PROVIDER=llama_local."
+            ) from exc
+        except Exception as exc:
+            raise RuntimeError(
+                "HuggingFace API request failed. Verify your HF_API_TOKEN and model ID."
+            ) from exc
 
-        print(retrieved_texts)
-        print("----"*10)
-        print(len(retrieved_texts))
-        print("----"*10)
-        print(completion)
+        if hasattr(completion, "choices") and completion.choices:
+            return completion.choices[0].message.content.strip()
 
-        result = completion.choices[0].message.content.strip()
-        print("Final Summary::: ",summary)
-        logger.debug("summarize_past_context: produced %d chars", len(summary))
-        # return summary
-        #----------------------------------------------------
+        if isinstance(completion, list) and completion:
+            return completion[0].get("generated_text", "").strip()
 
-        # HF returns a list of generated texts
-        if isinstance(result, list) and result:
-            return result[0].get("generated_text", "")
-
-        raise RuntimeError(f"Unexpected HuggingFace response format: {result}")
+        raise RuntimeError(f"Unexpected HuggingFace response format: {completion}")
 
 
 # ── LLaMA local backend ────────────────────────────────────────────────────────
@@ -197,6 +243,8 @@ def get_llm_client() -> BaseLLMClient:
         return HuggingFaceClient()
     if provider == "llama_local":
         return LlamaLocalClient()
+    if provider == "groq":
+        return GroqClient()
     raise ValueError(
         f"Unknown LLM_PROVIDER '{provider}'. "
         "Valid options: 'huggingface', 'llama_local'."
