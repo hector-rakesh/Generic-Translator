@@ -12,10 +12,12 @@ dist/
 eggs/
 MANIFEST
 # Virtual environments
-venv/
+*venv/
 venv/
 ENV/
 env/
+.env
+*.env*
 # Unit test / coverage reports
 htmlcov/
 tox/
