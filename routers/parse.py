@@ -30,6 +30,7 @@ MAX_BYTES = settings.max_file_size_mb * 1024 * 1024
 
 @router.get("/health", summary="Liveness check")
 async def health():
+
     return {"status": "ok"}    
     # from openai import OpenAI
     # import os
