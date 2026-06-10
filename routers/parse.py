@@ -147,6 +147,7 @@ async def parse_document(
                 success=False,
                 error="Schema validation failed",
                 detail=str(exc),
+                output=cleaned,
             ).model_dump(),
         )
 

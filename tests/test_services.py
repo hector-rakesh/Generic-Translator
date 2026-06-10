@@ -62,7 +62,11 @@ def test_unknown_field_passes():
 
 # ── LLM JSON extraction tests ──────────────────────────────────────────────────
 
-from services.llm_service import extract_json_from_response
+from services.llm_service import (
+    _deep_merge,
+    _split_document_text,
+    extract_json_from_response,
+)
 
 
 def test_clean_json_parses():
@@ -87,6 +91,37 @@ def test_invalid_json_raises():
     raw = "I could not extract anything useful."
     with pytest.raises(ValueError, match="valid JSON"):
         extract_json_from_response(raw)
+
+
+def test_split_document_text_returns_single_chunk_for_short_text():
+    text = "short document"
+    assert _split_document_text(text, max_chars=100, overlap=10) == [text]
+
+
+def test_split_document_text_splits_long_text():
+    text = "alpha\n\n" + ("word " * 200) + "\n\nbeta"
+    chunks = _split_document_text(text, max_chars=120, overlap=20)
+    assert len(chunks) >= 2
+    assert all(len(chunk) <= 120 for chunk in chunks)
+    assert "alpha" in chunks[0]
+    assert "beta" in chunks[-1]
+
+
+def test_deep_merge_combines_nested_arrays_by_id():
+    left = {
+        "credentialing_standards": [
+            {"standard_id": "CR 1", "elements": [{"element_id": "A", "intent": "left"}]}
+        ]
+    }
+    right = {
+        "credentialing_standards": [
+            {"standard_id": "CR 1", "elements": [{"element_id": "B", "intent": "right"}]},
+            {"standard_id": "CR 2", "standard_title": "Policies"},
+        ]
+    }
+    merged = _deep_merge(left, right)
+    assert len(merged["credentialing_standards"]) == 2
+    assert len(merged["credentialing_standards"][0]["elements"]) == 2
 
 
 # ── File parser tests ──────────────────────────────────────────────────────────
