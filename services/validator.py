@@ -101,10 +101,11 @@ def validate_output(
 
     if strict_errors:
         bullet_list = "\n  • ".join(strict_errors)
-        raise ValueError(
-            f"Schema validation failed on {len(strict_errors)} strict field(s):\n"
-            f"  • {bullet_list}"
-        )
+        # raise ValueError(
+        #     f"Schema validation failed on {len(strict_errors)} strict field(s):\n"
+        #     f"  • {bullet_list}"
+        # )
+        return data, warnings, bullet_list
 
     return data, warnings
 

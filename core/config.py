@@ -6,13 +6,15 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore", case_sensitive=False)
 
     # LLM provider: "huggingface" | "llama_local | "groq"
-    llm_provider: str = "groq"
+    llm_provider: str = ""
 
-    # HuggingFace
+    # HuggingFace Inference API (https://huggingface.co/docs/huggingface_hub/guides/inference)
+    # HF_API_TOKEN: token from https://huggingface.co/settings/tokens
+    # hf_model_id: optional backend suffix routes via HF partners, e.g. ":groq"
     HF_API_TOKEN: str = ""
-    # hf_model_id: str = "mistralai/Mistral-7B-Instruct-v0.3"
-    hf_model_id: str = "meta-llama/Llama-3.3-70B-Instruct"
-    # hf_model_id: str = "microsoft/Phi-3-mini-4k-instruct"
+    # hf_model_id: str = "meta-llama/Llama-3.3-70B-Instruct"
+    # hf_model_id: str = "meta-llama/Llama-3.1-8B-Instruct"
+    hf_model_id: str = "Qwen/Qwen2.5-7B-Instruct"
 
     # GROQ — Llama 4 Scout allows 30k TPM vs 12k for llama-3.3-70b-versatile (free tier)
     groq_model_id: str = "llama-3.3-70b-versatile"

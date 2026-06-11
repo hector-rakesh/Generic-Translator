@@ -12,6 +12,8 @@ import logging
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import JSONResponse
 
+from huggingface_hub import InferenceClient
+
 from core.config import get_settings
 from models.schemas import ErrorResponse, ParseResponse
 from services.file_parser import parse_file
@@ -30,6 +32,22 @@ MAX_BYTES = settings.max_file_size_mb * 1024 * 1024
 
 @router.get("/health", summary="Liveness check")
 async def health():
+
+    # Validate which provider actually serves the model
+    client = InferenceClient(
+        api_key=settings.HF_API_TOKEN,
+        model="meta-llama/Llama-3.3-70B-Instruct",
+        # provider="together",  # or "fireworks-ai", "hyperbolic", etc.
+    )
+
+    try:
+        response = client.chat_completion(
+            messages=[{"role": "user", "content": "Hi"}],
+            max_tokens=1,
+        )
+        print(f"✅ Provider responded: {response.choices[0].message.content}")
+    except Exception as e:
+        print(f"❌ Provider error: {e}")
 
     return {"status": "ok"}    
     # from openai import OpenAI
@@ -138,18 +156,39 @@ async def parse_document(
 
     # ── 5. Schema validation (per-field strictness) ────────────────────────────
     try:
-        cleaned, warnings = validate_output(extracted, schema)
-    except ValueError as exc:
-        # At least one strict field failed — return 422
-        return JSONResponse(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            content=ErrorResponse(
-                success=False,
-                error="Schema validation failed",
-                detail=str(exc),
-                output=cleaned,
-            ).model_dump(),
+        cleaned, warnings, bullet_list = validate_output(extracted, schema)
+        #TODO: Need to disable this later, enabled for testing purpose
+        if bullet_list:
+            return JSONResponse(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                content=ErrorResponse(
+                    success=False,
+                    error="Schema validation failed",
+                    detail=str(exc),
+                    output=cleaned,
+                ).model_dump(),
+            )
+    
+    except Exception as exc:
+        logger.exception("Schema validation failed")
+        raise HTTPException(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Schema validation failed: {exc}",
         )
+    
+    #TODO: Need to enable this later
+
+    # except ValueError as exc:
+    #     # At least one strict field failed — return 422
+    #     return JSONResponse(
+    #         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+    #         content=ErrorResponse(
+    #             success=False,
+    #             error="Schema validation failed",
+    #             detail=str(exc),
+    #             output=cleaned,
+    #         ).model_dump(),
+    #     )
 
     # ── 6. Build response ──────────────────────────────────────────────────────
     return ParseResponse(

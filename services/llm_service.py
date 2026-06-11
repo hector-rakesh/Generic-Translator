@@ -36,6 +36,7 @@ logger = logging.getLogger(__name__)
 settings = get_settings()
 
 # Groq free-tier per-request token caps (leave headroom below documented TPM).
+# These are INPUT token budgets — set conservatively to avoid 429s.
 GROQ_MODEL_TOKEN_LIMITS: dict[str, int] = {
     "llama-3.3-70b-versatile": 11_000,
     "llama-3.1-8b-instant": 5_500,
@@ -45,7 +46,16 @@ GROQ_MODEL_TOKEN_LIMITS: dict[str, int] = {
     "groq/compound": 65_000,
     "groq/compound-mini": 65_000,
 }
+
+# Output token budget for chat completions (Groq + HuggingFace).
+GROQ_MAX_COMPLETION_TOKENS = 4_096
+HF_MAX_COMPLETION_TOKENS = 4_096
+
 CHARS_PER_TOKEN_ESTIMATE = 4.5
+
+# Inter-chunk delay (seconds) to stay under Groq's per-minute token cap.
+# Only applied between chunks (not before the first one).
+GROQ_INTER_CHUNK_DELAY_SECS = 5
 
 
 class PayloadTooLargeError(RuntimeError):
@@ -64,48 +74,55 @@ def build_prompt(
     """
     Build the extraction prompt.
 
-    The model is instructed to:
-    1. Read the document.
-    2. Extract values described in the JSON schema.
-    3. Honour any `description` / `enum` / `x-*` hints in the schema.
-    4. Return ONLY a valid JSON object — no markdown, no explanation.
+    Design principles:
+    - System-style framing first so the model locks into extraction mode.
+    - Schema is compacted to save tokens.
+    - Explicit rules about null handling, key completeness, and output format
+      reduce validation failures caused by the model omitting keys or
+      wrapping output in markdown.
     """
-    # Compact JSON keeps the schema in fewer tokens (important for Groq TPM limits).
     schema_str = json.dumps(schema, separators=(",", ":"))
 
     chunk_note = ""
     if chunk_index is not None and total_chunks is not None and total_chunks > 1:
-        chunk_note = f"""
+        chunk_note = f"""\
 ## Document section
-This is section {chunk_index + 1} of {total_chunks} from the full document.
-Extract only information present in THIS section.
-Use `null` for schema fields not found in this section.
-Do not invent values that are not present in this section.
+This is section {chunk_index + 1} of {total_chunks} of the full document.
+- Extract ONLY information present in THIS section.
+- For schema fields not found in this section, output `null` — do NOT omit the key.
+- Do not carry over values from memory or other sections.
 """
 
-    return f"""You are a precise data-extraction assistant.
+    return f"""\
+You are a precise JSON data-extraction engine. Your only output is a single \
+valid JSON object — never markdown, never explanation, never code fences.
 
 ## Task
-Extract information from the DOCUMENT below and return a JSON object that
-conforms exactly to the provided JSON SCHEMA.
-{chunk_note}
-## Rules
-- Return ONLY the JSON object. No markdown fences, no explanation.
-- For every property in the schema, try to find the value in the document.
-- If a value cannot be found, use `null` (unless the schema specifies a default).
-- Follow `type`, `enum`, `format`, and `description` hints in the schema.
-- For boolean fields, map words like "yes/no", "true/false", "enabled/disabled"
-  to the correct boolean value.
-- For number/integer fields, strip currency symbols and thousand separators.
-- Do NOT invent values that are not present in the document.
+Read the DOCUMENT below and fill every field described in the JSON SCHEMA.
 
+## Critical rules
+1. OUTPUT FORMAT: Return ONLY the raw JSON object. No ```json fences, \
+no preamble, no trailing text. The very first character of your response \
+must be `{{` and the last must be `}}`.
+2. KEY COMPLETENESS: Every key present in the schema MUST appear in your output. \
+Never omit a key — use `null` when the value is not in the document.
+3. NULL HANDLING: Use JSON `null` (not the string "null", not "N/A", not "") \
+for missing values.
+4. TYPES: Strictly follow each field's `type`. \
+Strip currency symbols and thousand separators from numbers. \
+Map "yes/no", "true/false", "enabled/disabled" to boolean `true`/`false`.
+5. ENUMS: Only use values listed in the field's `enum` array. If the document \
+value doesn't match any enum, use `null`.
+6. NO INVENTION: Do not infer, assume, or hallucinate values absent from the document.
+7. DESCRIPTIONS: Use the `description` hint on each field to resolve ambiguity.
+{chunk_note}
 ## JSON Schema
 {schema_str}
 
 ## Document
 {document_text}
 
-## Output (JSON only)
+## Output (raw JSON only — starts with `{{`)
 """
 
 
@@ -114,24 +131,40 @@ def _prompt_overhead_chars(schema: dict[str, Any]) -> int:
     return len(build_prompt("", schema))
 
 
-def _groq_max_tokens_per_request() -> int:
-    if settings.groq_max_tokens_per_request > 0:
+def _groq_max_tokens_per_request(model_id: str | None = None) -> int:
+    if settings.groq_max_tokens_per_request > 0 and model_id is None:
         return settings.groq_max_tokens_per_request
 
-    model = settings.groq_model_id.lower()
+    model = (model_id or settings.groq_model_id).lower()
     if model in GROQ_MODEL_TOKEN_LIMITS:
         return GROQ_MODEL_TOKEN_LIMITS[model]
 
-    for model_id, limit in GROQ_MODEL_TOKEN_LIMITS.items():
-        if model_id in model or model.endswith(model_id.split("/")[-1]):
+    for known_id, limit in GROQ_MODEL_TOKEN_LIMITS.items():
+        if known_id in model or model.endswith(known_id.split("/")[-1]):
             return limit
 
     return 10_000
 
 
+def _hf_inference_backend(model_id: str) -> str | None:
+    """Return the inference backend suffix, e.g. 'groq' from 'model-id:groq'."""
+    if ":" not in model_id:
+        return None
+    return model_id.rsplit(":", 1)[-1].lower()
+
+
 def _max_prompt_chars_for_provider() -> int:
-    if settings.llm_provider.lower() == "groq":
+    llm_provider = settings.llm_provider.lower()
+
+    if llm_provider == "groq":
         return int(_groq_max_tokens_per_request() * CHARS_PER_TOKEN_ESTIMATE)
+
+    if llm_provider == "huggingface":
+        backend = _hf_inference_backend(settings.hf_model_id)
+        if backend == "groq":
+            # HF routes to Groq — apply the same per-request token budget.
+            return int(_groq_max_tokens_per_request(settings.hf_model_id) * CHARS_PER_TOKEN_ESTIMATE)
+
     return settings.llm_max_prompt_chars
 
 
@@ -254,11 +287,47 @@ def _is_payload_too_large(exc: Exception) -> bool:
     return "413" in message or "too large" in message or "payload too large" in message
 
 
+def _extract_chat_completion_text(completion: Any, *, provider: str) -> str:
+    """
+    Parse an OpenAI-style chat completion response.
+
+    Both Groq and HuggingFace InferenceClient return:
+        completion.choices[0].message.content
+    """
+    if not hasattr(completion, "choices") or not completion.choices:
+        raise RuntimeError(f"Unexpected {provider} response format: {completion!r}")
+
+    choice = completion.choices[0]
+    message = choice.message
+    content = message.content if hasattr(message, "content") else None
+
+    if not content or not str(content).strip():
+        raise RuntimeError(f"Empty response from {provider}.")
+
+    finish_reason = getattr(choice, "finish_reason", None)
+    if finish_reason == "length":
+        logger.warning(
+            "%s response was truncated (finish_reason=length). "
+            "Extracted JSON may be incomplete.",
+            provider,
+        )
+
+    return str(content).strip()
+
+
 # ── Abstract base ──────────────────────────────────────────────────────────────
 
 class BaseLLMClient(ABC):
+    """
+    Provider-agnostic interface for LLM text completion.
+
+    Every backend (Groq, HuggingFace, local LLaMA) implements `complete(prompt)`.
+    The rest of the app — build_prompt → complete → extract_json_from_response —
+    never imports provider-specific SDKs.
+    """
+
     @abstractmethod
-    def complete(self, prompt: str) -> str:
+    def complete(self, prompt: str, document_text: str) -> str:
         """Send *prompt* and return the raw text response."""
 
 
@@ -267,6 +336,10 @@ class BaseLLMClient(ABC):
 class GroqClient(BaseLLMClient):
     """
     Calls the Groq Inference API.
+
+    Recommended model: llama-3.3-70b-versatile
+      - Best instruction-following + JSON fidelity on free tier
+      - 6k tokens/request input, 8k output ceiling
     """
 
     def __init__(self):
@@ -283,13 +356,13 @@ class GroqClient(BaseLLMClient):
         wait=wait_exponential(multiplier=1, min=2, max=10),
         retry=retry_if_not_exception_type(PayloadTooLargeError),
     )
-    def complete(self, prompt: str) -> str:
+    def complete(self, prompt: str, document_text: str) -> str:
         try:
             completion = self.client.chat.completions.create(
                 model=self.model_id,
                 messages=[{"role": "user", "content": prompt}],
-                temperature=0.1,       # near-deterministic for extraction
-                max_tokens=2048,
+                temperature=0.0,           # fully deterministic for extraction
+                max_tokens=GROQ_MAX_COMPLETION_TOKENS,
             )
         except APIConnectionError as exc:
             raise RuntimeError(
@@ -308,89 +381,73 @@ class GroqClient(BaseLLMClient):
                 ) from exc
             raise RuntimeError(f"Groq API error: {exc}") from exc
 
-        return completion.choices[0].message.content.strip()
+        return _extract_chat_completion_text(completion, provider="Groq")
 
 
 # ── HuggingFace backend ────────────────────────────────────────────────────────
 
 class HuggingFaceClient(BaseLLMClient):
     """
-    Uses the HuggingFace Inference API (free tier).
-    Model must support the text-generation task.
-    """
+    Uses the HuggingFace Inference API via InferenceClient.
 
-    BASE_URL = "https://api-inference.huggingface.co/models"
+    Follows the official HF pattern:
+        client = InferenceClient(api_key=HF_TOKEN)
+        completion = client.chat.completions.create(
+            model="meta-llama/Llama-3.3-70B-Instruct:groq",
+            messages=[{"role": "user", "content": prompt}],
+        )
+        text = completion.choices[0].message.content
+
+  Model IDs may include a backend suffix (e.g. `:groq`) to route through
+  HuggingFace's serverless inference partners.
+    """
 
     def __init__(self):
         if not settings.HF_API_TOKEN:
             raise RuntimeError(
                 "HF_API_TOKEN is not set. "
-                "Add it to your .env file or environment variables."
+                "Get one at https://huggingface.co/settings/tokens and add it to .env."
             )
         self.model_id = settings.hf_model_id
-        # self.headers = {"Authorization": f"Bearer {settings.HF_API_TOKEN}"}
-        print("Using HuggingFace token:", settings.HF_API_TOKEN)
-        self.client = InferenceClient(token=settings.HF_API_TOKEN)
+        self.client = InferenceClient(api_key=settings.HF_API_TOKEN)
+        logger.info("HuggingFace InferenceClient ready (model=%s)", self.model_id)
 
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=10),
+        retry=retry_if_not_exception_type(PayloadTooLargeError),
     )
-    def complete(self, prompt: str) -> str:
-
-        # Using HuggingFace URL
-        #------------------------------------------
-        # url = f"{self.BASE_URL}/{self.model_id}"
-
-        # payload = {
-        #     "inputs": prompt,
-        #     "parameters": {
-        #         "max_new_tokens": 2048,
-        #         "temperature": 0.1,       # near-deterministic for extraction
-        #         "return_full_text": False, # return only generated tokens
-        #         "do_sample": False,
-        #     },
-        # }
-
-        # logger.debug("Calling HuggingFace API: model=%s", self.model_id)
-        # response = requests.post(url, headers=self.headers, json=payload, timeout=120)
-
-        # if response.status_code == 503:
-        #     # Model is loading — tenacity will retry
-        #     raise RuntimeError(f"Model '{self.model_id}' is loading. Retrying…")
-
-        # response.raise_for_status()
-
-        # result = response.json()
-        #------------------------------------------
-
-        # Using HuggingFace API Client
-        #------------------------------------------
+    def complete(self, prompt: str, document_text: str) -> str:
         try:
+            logger.info("Into complete method....HuggingFace InferenceClient ready (model=%s)", self.model_id)
+            
+            # if self.model_id == "Qwen/Qwen2.5-7B-Instruct":
+            #     completion = self.client.chat.completions.create(
+            #         model=self.model_id,
+            #         messages=[{"role": "system", "content": prompt},
+            #         {"role": "user", "content": document_text}],
+            #         temperature=0.0,
+            #         max_tokens=HF_MAX_COMPLETION_TOKENS,
+            #     )
+            # else:
             completion = self.client.chat.completions.create(
-                model=self.model_id,
-                messages=[{"role": "user", "content": prompt}],
-            )
+                        model=self.model_id,
+                        messages=[{"role": "user", "content": prompt}],
+                        temperature=0.0,
+                        max_tokens=HF_MAX_COMPLETION_TOKENS,
+                    )
         except Exception as exc:
-            print("ERROR::: Error at chat completion create function.....")
-            print(exc)
+            if _is_payload_too_large(exc):
+                raise PayloadTooLargeError(
+                    f"HuggingFace request too large for model '{self.model_id}'. "
+                    f"Prompt was {len(prompt)} chars."
+                ) from exc
             raise RuntimeError(
-                "Network error contacting HuggingFace Inference API. "
-                "Check internet/DNS connectivity, your network/proxy settings, "
-                "or switch to a local provider with LLM_PROVIDER=llama_local."
-            ) from exc
-        except Exception as exc:
-            raise RuntimeError(
-                "HuggingFace API request failed. Verify your HF_API_TOKEN and model ID."
+                "HuggingFace Inference API call failed. "
+                "Verify HF_API_TOKEN and hf_model_id in .env."
             ) from exc
 
-        if hasattr(completion, "choices") and completion.choices:
-            return completion.choices[0].message.content.strip()
-
-        if isinstance(completion, list) and completion:
-            return completion[0].get("generated_text", "").strip()
-
-        raise RuntimeError(f"Unexpected HuggingFace response format: {completion}")
+        return _extract_chat_completion_text(completion, provider="HuggingFace")
 
 
 # ── LLaMA local backend ────────────────────────────────────────────────────────
@@ -409,14 +466,14 @@ class LlamaLocalClient(BaseLLMClient):
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=1, max=5),
     )
-    def complete(self, prompt: str) -> str:
+    def complete(self, prompt: str, document_text: str) -> str:
         url = f"{self.base_url}/chat/completions"
 
         payload = {
             "model": self.model_id,
             "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0.1,
-            "max_tokens": 2048,
+            "temperature": 0.0,
+            "max_tokens": 4096,
         }
 
         logger.debug("Calling local LLaMA endpoint: %s", url)
@@ -484,20 +541,8 @@ def extract_json_from_response(raw: str) -> dict[str, Any]:
     )
 
 
-def _sleep_for_groq(func):
-    from functools import wraps
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        logger.info("Sleeping for 5 seconds")
-        time.sleep(5)
-        result = func(*args, **kwargs)
-        logger.info("Done sleeping")
-        return result
-    return wrapper
-
-
 # ── Main public function ───────────────────────────────────────────────────────
-@_sleep_for_groq
+
 def _extract_single_chunk(
     client: BaseLLMClient,
     document_text: str,
@@ -513,7 +558,7 @@ def _extract_single_chunk(
         total_chunks=total_chunks,
     )
     logger.info("Sending extraction prompt (%d chars) to LLM", len(prompt))
-    raw = client.complete(prompt)
+    raw = client.complete(prompt, document_text)
     logger.info("LLM responded (%d chars)", len(raw))
     logger.debug("Raw LLM output:\n%s", raw)
     return extract_json_from_response(raw), raw
@@ -536,12 +581,26 @@ def run_extraction(
     max_doc_chars = _max_document_chars_per_request(schema)
     overlap = settings.llm_chunk_overlap_chars
     chunk_size = max_doc_chars
+    llm_provider = settings.llm_provider.lower()
+    is_groq = llm_provider == "groq"
+    is_hf_groq = (
+        llm_provider == "huggingface"
+        and _hf_inference_backend(settings.hf_model_id) == "groq"
+    )
+    needs_chunk_delay = is_groq or is_hf_groq
 
-    if settings.llm_provider.lower() == "groq":
+    if is_groq:
         logger.info(
             "Groq model=%s token budget=%d (~%d prompt chars)",
             settings.groq_model_id,
             _groq_max_tokens_per_request(),
+            _max_prompt_chars_for_provider(),
+        )
+    elif is_hf_groq:
+        logger.info(
+            "HuggingFace model=%s (groq backend) token budget=%d (~%d prompt chars)",
+            settings.hf_model_id,
+            _groq_max_tokens_per_request(settings.hf_model_id),
             _max_prompt_chars_for_provider(),
         )
 
@@ -561,12 +620,18 @@ def run_extraction(
             merged: dict[str, Any] | None = None
             raw_parts: list[str] = []
             for index, chunk in enumerate(chunks):
-                logger.info("Processing chunk %d of %d", index, len(chunks))
-                # if index > 0 and settings.llm_provider.lower() == "groq":
-                #     # logger.info("Sleeping for 5 seconds")
-                #     # Spread requests to stay under Groq's per-minute token cap.
-                #     time.sleep(2)
+                # Inter-chunk delay on Groq to stay under per-minute token cap.
+                # Applied BETWEEN chunks only (not before the first one).
+                if index > 0 and needs_chunk_delay:
+                    logger.info(
+                        "Chunk %d/%d — waiting %ds before next request",
+                        index,
+                        len(chunks),
+                        GROQ_INTER_CHUNK_DELAY_SECS,
+                    )
+                    time.sleep(GROQ_INTER_CHUNK_DELAY_SECS)
 
+                logger.info("Processing chunk %d of %d", index + 1, len(chunks))
                 parsed, raw = _extract_single_chunk(
                     client,
                     chunk,
